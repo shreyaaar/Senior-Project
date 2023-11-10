@@ -1,0 +1,149 @@
+---
+title: "460 Data and Methodology (PANEL)"
+author: "Michael Earl, Shreya Ravilla"
+format: 
+  html:
+    self-contained: true
+    code-tools: true
+    toc: true
+editor: source
+execute: 
+  error: true
+  echo: true
+  message: false
+  warning: false
+---
+
+```{r}
+#Packages and read data
+library(tidyverse)
+library(readxl)
+library(broom)
+library(kableExtra)
+library(estimatr)
+library(dynlm)
+alc<-read_excel("Panel.xlsx")
+```
+
+```{r}
+#function to recode missing values to na's
+no_neg <- function(data) {
+  data[data < 0] <- NA
+  return(data)
+}
+
+recode_region <- function(data) {
+  data <- recode(data,
+                 `1` = "Northeast",
+                 `2` = "North_Central",
+                 `3` = "South",
+                 `4` = "West",
+                 `-4` = NA_character_,
+                 `-5` = NA_character_)
+  return(data)
+}
+#function to recode regions
+recode_region <- function(data) {
+  data <- recode(data,
+                 `1` = "Northeast",
+                 `2` = "North_Central",
+                 `3` = "South",
+                 `4` = "West",
+                 `-4` = NA_character_,
+                 `-5` = NA_character_)
+  return(data)
+}
+#function to recode urban or rural
+recode_urbrur <- function(data) {
+  data <- recode(data,
+                 `0` = "Rural",
+                 `1` = "Urban",
+                 `2` = NA_character_)
+  return(data)
+}
+
+```
+
+```{r}
+#cleaning data
+clean_alc <- alc |> 
+  mutate_all(no_neg) |> 
+  mutate(sex = recode(sex, `1` = "Male", 
+                           `2` = "Female", 
+                            `0` = NA_character_),
+         cs_os = recode(cs_os, `1` = "crosssectional",
+                               `0` = "oversample"),
+         race = recode(race, 
+                       `1` = "Black", 
+                       `2` = "Hispanic", 
+                       `3` = "Non-Hispanic White", 
+                       `4` = "White"),
+         ASVAB = if_else(asvab == 0, NA, asvab/1000),
+         region = recode_region(region),
+         urbrur= recode_urbrur(urbrur),
+         year = factor(year))
+
+use_alc <- clean_alc |> 
+  select(wag_sal, drink_perday, race, sex,
+         weight, urbrur, year, asvab) |> 
+  na.omit()
+```
+
+```{r}
+#linear regression with control vars
+lin_mod <-lm_robust(wag_sal ~ drink_perday + race + sex + weight + urbrur + year +asvab, 
+   data = use_alc, se_type="HC1") 
+
+#table with regression coeffs
+lin_mod|>
+  tidy() |> 
+  select(term:conf.high) |> 
+  mutate(p.value = if_else(p.value <0.0001, 
+                           "<0.0001", 
+                           substr(as.character(p.value), 1, 6))) |> 
+  rename(Coefficient = term,
+         Estimate = estimate,
+         `Standard Error` = std.error,
+         TStatistic = statistic,
+         PValue = p.value,
+         Lower = conf.low,
+         Upper = conf.high) |> 
+  kable(format = "html",
+        caption = "Table 1: Regression Coefficients",
+        digits = 4) |> 
+  kable_material("hover",
+                 font_size = 18,
+                 html_font = "Cambria Math",
+                 full_width = FALSE)
+
+#model fit
+lin_mod |> 
+  glance() |> 
+  select(r.squared, statistic, p.value)  |>
+  mutate(p.value = if_else(p.value <0.0001, 
+                           "<0.0001", 
+                           substr(as.character(p.value), 1, 6))) |> 
+  kable(format = "html",
+               col.names = c("R-Squared", "F-statisitic", "P-value"),
+               caption =  "Table 2: R-Squared",
+                            digits = 4) |> 
+  kable_material("hover",
+                 font_size = 18,
+                 html_font = "Cambria Math",
+                 full_width = TRUE)
+```
+
+```{r}
+use_alc |> 
+  ggplot(mapping = aes(x=drink_perday,
+                       y=wag_sal)) +
+  geom_jitter(alpha = 0.1) +  
+  labs(title = "Annual Wage vs. Drinks Per Day",
+       subtitle = "Wage", 
+       x = "Drinks Per Day (Last 30 Days)",
+       y = NULL)+
+  guides(color = guide_legend(title = "Year"))+
+  scale_y_continuous(labels = scales::dollar_format()) +
+  theme_bw()
+  
+```
